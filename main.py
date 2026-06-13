@@ -45,7 +45,8 @@ from segmenter    import segment_lines
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR    = os.path.join(SCRIPT_DIR, "ocr_logs")
-MODELS_DIR = os.path.join(SCRIPT_DIR, "models")
+# MODELS_DIR = r"C:\Users\lawizi\FusionOCR-models"
+MODELS_DIR = r"C:\Users\lawizi\FusionOCR-models"
 os.makedirs(LOG_DIR,    exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 
