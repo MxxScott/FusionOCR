@@ -1,59 +1,98 @@
 # FusionOCR
 
-A multi-engine OCR pipeline that combines **Tesseract**, **EasyOCR**, and **Calamari** via word-level Levenshtein consensus voting, then cleans the output with **Google FLAN-T5**.
+Multi-engine OCR pipeline for **children's handwritten English** — exam scripts, answer sheets, exercise books.
 
-## How it works
+Accuracy is the primary design goal. The pipeline runs four OCR engines and fuses their outputs via weighted Levenshtein consensus, with automatic flagging of low-confidence lines for human review.
+
+## Architecture
 
 ```
 Image
-  ├── pytesseract  ─┐
-  ├── EasyOCR      ─┼──► Levenshtein consensus ──► FLAN-T5 cleanup ──► Final text
-  └── Calamari     ─┘
+  └─► Preprocessor
+        · Remove ruled lines (horizontal + vertical margin lines)
+        · Deskew
+        · Denoise (non-local means)
+        · Adaptive binarize (CLAHE + Gaussian threshold)
+        · Morphological ink-gap fill
+            └─► Segmenter (horizontal projection → line crops)
+                  ├─► TrOCR-large-handwritten (batch, 8-beam) ─┐
+                  ├─► TrOCR-large-printed     (batch, 8-beam) ─┤
+                  ├─► EasyOCR                 (parallel)       ┤─► Weighted consensus → JSON
+                  └─► Tesseract               (PSM-7)         ─┘
 ```
 
-Each engine extracts text independently. For each word position, the engine outputs are compared pairwise using Levenshtein distance — the word closest to all others wins. The consensus text is then passed through FLAN-T5 for grammar and coherence correction.
+**Why two TrOCR models?**
+Children's handwriting spans from neat block print to semi-cursive. The handwriting model covers irregular joined letters; the printed model covers block-letter writers. Consensus between both is more robust than either alone.
 
-## Requirements
+**Engine weights in consensus:**
+
+| Engine | Weight | Rationale |
+|---|---|---|
+| TrOCR-large-handwritten | 0.40 | Primary; trained on IAM handwriting dataset |
+| TrOCR-large-printed | 0.30 | Covers block/print writers |
+| EasyOCR | 0.20 | Deep learning; strong on varied styles |
+| Tesseract | 0.10 | Fast; useful for clearly printed words |
+
+## Output
+
+```json
+{
+  "source": "script_page1.jpg",
+  "full_text": "The water cycle begins when...",
+  "lines": [
+    {
+      "line": 1,
+      "text": "The water cycle begins when",
+      "confidence": 0.91,
+      "engines": {
+        "trocr_handwritten": "The water cycle begins when",
+        "trocr_printed": "The water cycle begins when",
+        "easyocr": "The water cycle begins when",
+        "tesseract": "The water eycle begins when"
+      },
+      "flagged": false
+    }
+  ],
+  "flagged_lines": [],
+  "elapsed_sec": 6.4
+}
+```
+
+Lines below confidence `0.65` are included in `flagged_lines` — these should be reviewed against the original image before marking.
+
+## Setup
 
 ```bash
 pip install -r requirements.txt
 ```
 
-You will also need:
-- **Tesseract** installed on your system: https://github.com/tesseract-ocr/tesseract
-- A **CUDA-capable GPU** is strongly recommended (EasyOCR and FLAN-T5 run on CPU but will be slow)
+Also install Tesseract: https://github.com/tesseract-ocr/tesseract
+
+**VRAM note:** Two TrOCR-large models require ~3GB VRAM. On CPU, inference is slower but functional.
 
 ## Usage
 
+```bash
+python main.py path/to/script_page.jpg
+```
+
 ```python
 from main import run_ocr
-
-result = run_ocr("path/to/image.png")
-print(result)
+result = run_ocr("script_page.jpg")
+print(result["full_text"])
+for line in result["flagged_lines"]:
+    print(f"Review line {line['line']}: {line['text']}")
 ```
 
-Or run directly:
+## Configuration (`main.py`)
 
-```bash
-python main.py
-```
-
-Place a test image at `test_image.png` in the same directory, or modify `__main__` to point to your image.
-
-## Logging
-
-Every run generates a timestamped log file in `ocr_logs/` with full debug output from all three engines and the final consensus result.
+| Variable | Default | Notes |
+|---|---|---|
+| `NUM_BEAMS` | `8` | Beam search width — higher = more accurate |
+| `TROCR_BATCH` | `4` | Reduce if GPU OOM |
+| `CONFIDENCE_THRESHOLD` | `0.65` | Below this → flagged for review |
+| `WEIGHTS` | see above | Adjust per writing style of your cohort |
 
 ## Stack
 
-- `pytesseract` — Tesseract wrapper
-- `easyocr` — deep learning OCR (CRAFT text detection + CRNN recognition)
-- `calamari-ocr` — sequence-to-sequence OCR trained on historical documents
-- `python-Levenshtein` — fast edit distance for consensus voting
-- `transformers` (HuggingFace) — FLAN-T5 for post-processing
-- `Pillow` — image loading
-
-## Notes
-
-- Model weights (`*.pth`, `uw3-modern-english/`) are excluded from this repo. EasyOCR downloads its models automatically on first run. For Calamari, download a pretrained model from the [Calamari model zoo](https://github.com/Calamari-OCR/calamari_models).
-- GPU memory: FLAN-T5-base requires ~1GB VRAM. Use `flan-t5-small` if memory-constrained (see commented line in `main.py`).
+`transformers` · `torch` · `easyocr` · `pytesseract` · `opencv-python` · `python-Levenshtein` · `Pillow`
