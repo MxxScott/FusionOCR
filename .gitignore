@@ -1,0 +1,19 @@
+# OCR run logs
+ocr_logs/
+
+# Model weights (too large for git — see README for download instructions)
+models/
+*.pth
+uw3-modern-english/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+.venv/
+
+# Test images (add your own)
+test_image.png

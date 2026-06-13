@@ -1,0 +1,7 @@
+pytesseract>=0.3.10
+easyocr>=1.7.1
+calamari-ocr>=2.3.0
+python-Levenshtein>=0.25.0
+Pillow>=10.0.0
+transformers>=4.40.0
+torch>=2.0.0
